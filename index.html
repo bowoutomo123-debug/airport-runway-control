@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Airport Runway Control — 3D</title>
+<script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Arial,sans-serif}body{background:linear-gradient(135deg,#020617,#0f172a,#1e293b);min-height:100vh;color:#fff}header{background:rgba(15,23,42,.95);padding:25px;text-align:center;border-bottom:2px solid #334155}header h1{font-size:32px;margin-bottom:8px}header p{color:#94a3b8}.container{width:95%;max-width:1600px;margin:26px auto}.connection,.airport,.card,.emergency{background:#111827;border:1px solid #334155;border-radius:18px;padding:20px;margin-bottom:22px}.connection{text-align:center}.status-online{color:#22c55e;font-weight:bold}.status-offline{color:#ef4444;font-weight:bold}.airport h2{text-align:center;margin:4px 0 16px}.scene-wrap{position:relative;border:2px solid #64748b;border-radius:15px;overflow:hidden;background:#07111e;min-height:330px}.scene-wrap canvas{display:block;width:100%;height:560px}.scene-hint{position:absolute;left:14px;bottom:12px;background:#0f172acc;color:#cbd5e1;border:1px solid #475569;border-radius:8px;padding:8px 10px;font-size:12px;pointer-events:none}.scene-legend{display:flex;flex-wrap:wrap;justify-content:center;gap:12px;padding:12px 0 0;color:#cbd5e1;font-size:13px}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px}.card{text-align:center;padding:25px}.card h3{margin-bottom:15px}.device-status{margin-bottom:18px;padding:10px;border-radius:8px;background:#1e293b;color:#94a3b8}.device-status.active{background:#064e3b;color:#4ade80}.device-status.danger{background:#7f1d1d;color:#fca5a5}button{border:0;padding:12px 20px;margin:5px;border-radius:10px;cursor:pointer;font-size:15px;font-weight:bold;transition:.2s}button:hover{transform:scale(1.04)}button:active{transform:scale(.98)}.btn-on{background:#16a34a;color:#fff}.btn-off{background:#dc2626;color:#fff}.btn-all{background:#2563eb;color:#fff}.btn-emergency{background:#b91c1c;color:#fff;width:90%;font-size:18px}.emergency{margin-top:20px;border:2px solid #7f1d1d;text-align:center}.emergency h2{color:#f87171;margin-bottom:15px}footer{text-align:center;color:#64748b;padding:20px 12px 30px}.small-note{font-size:12px;color:#94a3b8;margin-top:8px}@media(max-width:600px){header h1{font-size:23px}.scene-wrap canvas{height:390px}.container{width:94%}}
+</style>
+</head>
+<body>
+<header><h1>✈️ AIRPORT RUNWAY CONTROL</h1><p>ESP32 • MQTT • WOKWI • 3D RUNWAY SIMULATION</p></header>
+<div class="container">
+  <div class="connection">MQTT STATUS: <span id="connectionStatus" class="status-offline">MENGHUBUNGKAN...</span><p class="small-note">Visual 3D adalah simulasi. Kontrol ESP32 aktif jika broker MQTT dan ESP32 Wokwi terhubung.</p></div>
+  <section class="airport"><h2>🛫 RUNWAY VISUALIZATION — 3D NIGHT MODE</h2>
+    <div class="scene-wrap" id="sceneWrap"><div class="scene-hint">Seret mouse untuk memutar • Scroll untuk zoom • Klik kanan/dua jari untuk geser</div></div>
+    <div class="scene-legend"><span><i class="dot" style="background:#fff"></i>Runway edge/centerline</span><span><i class="dot" style="background:#38bdf8"></i>Approach lights</span><span><i class="dot" style="background:#22c55e"></i>Beacon aktif (simulasi)</span><span><i class="dot" style="background:#ef4444"></i>Runway end lights</span></div>
+  </section>
+  <div class="grid">
+    <div class="card"><h3>💡 RUNWAY LIGHT</h3><div id="runwayStatus" class="device-status">OFF</div><button class="btn-on" onclick="sendCommand('RUNWAY_ON')">ON</button><button class="btn-off" onclick="sendCommand('RUNWAY_OFF')">OFF</button></div>
+    <div class="card"><h3>🔵 APPROACH LIGHT</h3><div id="approachStatus" class="device-status">OFF</div><button class="btn-on" onclick="sendCommand('APPROACH_ON')">ON</button><button class="btn-off" onclick="sendCommand('APPROACH_OFF')">OFF</button></div>
+    <div class="card"><h3>🔴 AIRPORT BEACON</h3><div id="beaconStatus" class="device-status">OFF</div><button class="btn-on" onclick="sendCommand('BEACON_ON')">ON</button><button class="btn-off" onclick="sendCommand('BEACON_OFF')">OFF</button></div>
+    <div class="card"><h3>⚙️ SYSTEM CONTROL</h3><div class="device-status">MASTER CONTROL</div><button class="btn-all" onclick="sendCommand('ALL_ON')">ALL ON</button><button class="btn-off" onclick="sendCommand('ALL_OFF')">ALL OFF</button></div>
+  </div>
+  <div class="emergency"><h2>🚨 EMERGENCY ALARM</h2><div id="emergencyStatus" class="device-status">SYSTEM NORMAL</div><button class="btn-emergency" onclick="sendCommand('EMERGENCY_ON')">🚨 ACTIVATE EMERGENCY</button><br><button class="btn-all" onclick="sendCommand('EMERGENCY_OFF')">RESET EMERGENCY</button></div>
+</div>
+<footer>Airport Runway Control System<br>ESP32 + MQTT + Wokwi + Three.js</footer>
+<script>
+// ===== 3D RUNWAY SCENE =====
+const wrap=document.getElementById('sceneWrap');
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x07111e); scene.fog=new THREE.Fog(0x07111e,100,270);
+const camera=new THREE.PerspectiveCamera(48,wrap.clientWidth/560,0.1,500); camera.position.set(35,34,64); camera.lookAt(0,0,0);
+const renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setPixelRatio(Math.min(window.devicePixelRatio,2)); renderer.setSize(wrap.clientWidth,560); renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.15; wrap.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0x9bbcff,0x18202a,1.2)); const moon=new THREE.DirectionalLight(0x9bbcff,1.6); moon.position.set(-35,60,25); moon.castShadow=true; scene.add(moon);
+// Ground and apron
+autoMat(); function autoMat(){}
+const ground=new THREE.Mesh(new THREE.PlaneGeometry(260,260),new THREE.MeshStandardMaterial({color:0x17251f,roughness:1}));ground.rotation.x=-Math.PI/2;ground.position.y=-.25;ground.receiveShadow=true;scene.add(ground);
+// distant airport lights
+for(let i=0;i<90;i++){let x=(Math.random()-.5)*210,z=(Math.random()-.5)*210;if(Math.abs(x)<17&&Math.abs(z)<100)continue;const m=new THREE.Mesh(new THREE.SphereGeometry(.22,6,6),new THREE.MeshBasicMaterial({color:i%3===0?0xffb45c:0x91bfff}));m.position.set(x,.15,z);scene.add(m)}
+// runway axis along Z
+const runwayMat=new THREE.MeshStandardMaterial({color:0x30343a,roughness:.92});const runway=new THREE.Mesh(new THREE.PlaneGeometry(18,125),runwayMat);runway.rotation.x=-Math.PI/2;runway.position.y=.01;runway.receiveShadow=true;scene.add(runway);
+// shoulder edges
+const shoulderMat=new THREE.MeshStandardMaterial({color:0x51545a,roughness:1});for(const x of [-9.7,9.7]){const sh=new THREE.Mesh(new THREE.PlaneGeometry(1.4,127),shoulderMat);sh.rotation.x=-Math.PI/2;sh.position.set(x,.005,0);scene.add(sh)}
+const whitePaint=new THREE.MeshStandardMaterial({color:0xe8e9e5,roughness:.8});
+function box(w,h,d,mat,x,y,z){const o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);o.position.set(x,y,z);scene.add(o);return o}
+// centerline dashes
+for(let z=-58;z<=58;z+=8)box(.24,.035,3.8,whitePaint,0,.045,z);
+// threshold piano stripes at both ends
+for(const end of [-1,1]){for(let i=-3;i<=3;i++){box(.72,.04,5,whitePaint,i*1.05,.05,end*55)}
+ // runway designation numbers represented with simple threshold bars to avoid incorrect runway heading labels
+}
+// aiming point blocks
+for(const z of [-24,24])for(const x of [-3.5,3.5])box(1.15,.04,8,whitePaint,x,.05,z);
+// lights with emissive bulbs, updateable by group
+const runwayBulbs=[],approachBulbs=[],endBulbs=[];
+function bulb(x,y,z,color,group,size=.19){const mesh=new THREE.Mesh(new THREE.SphereGeometry(size,8,8),new THREE.MeshBasicMaterial({color}));mesh.position.set(x,y,z);scene.add(mesh);group.push(mesh);const glow=new THREE.Mesh(new THREE.SphereGeometry(size*2.4,8,8),new THREE.MeshBasicMaterial({color,transparent:true,opacity:.16,depthWrite:false}));glow.position.copy(mesh.position);scene.add(glow);group.push(glow)}
+for(const x of [-8.65,8.65])for(let z=-58;z<=58;z+=4)bulb(x,.16,z,0xffffff,runwayBulbs,.12);
+for(let z=-55;z<=55;z+=4)bulb(0,.12,z,0xffffff,runwayBulbs,.085);
+for(const x of [-8.65,8.65])for(const z of [-62,62])for(let k=-4;k<=4;k++)bulb(x+k*2.1,.17,z,0xff2525,endBulbs,.15);
+// Approach light corridor extends beyond near threshold (z positive)
+for(let z=64;z<=103;z+=5){bulb(0,.17,z,0x48bfff,approachBulbs,.16);if(z%10===4){bulb(-2.2,.16,z,0xffffff,approachBulbs,.11);bulb(2.2,.16,z,0xffffff,approachBulbs,.11)}}
+// approach crossbars
+for(let z=68;z<=98;z+=10)box(8,.025,.22,new THREE.MeshStandardMaterial({color:0x9ca3af}),0,.04,z);
+// taxiway spur
+const taxi=new THREE.Mesh(new THREE.PlaneGeometry(12,34),new THREE.MeshStandardMaterial({color:0x292e34,roughness:1}));taxi.rotation.x=-Math.PI/2;taxi.position.set(17,.015,18);scene.add(taxi);
+const taxiBulbs=[];for(let z=5;z<=31;z+=3){bulb(12,.14,z,0x38aaff,taxiBulbs,.11);bulb(22,.14,z,0x38aaff,taxiBulbs,.11)}
+// Beacon tower and rotating green/white beam
+const beaconParts=[];const towerMat=new THREE.MeshStandardMaterial({color:0x687789,metalness:.4,roughness:.6});const tower= new THREE.Mesh(new THREE.CylinderGeometry(.28,.55,8,8),towerMat);tower.position.set(-23,4,4);scene.add(tower);const beaconBase=new THREE.Mesh(new THREE.CylinderGeometry(1.1,1.1,.25,12),new THREE.MeshStandardMaterial({color:0x283548}));beaconBase.position.set(-23,8.05,4);scene.add(beaconBase);
+const beaconBulb=new THREE.Mesh(new THREE.SphereGeometry(.48,12,12),new THREE.MeshBasicMaterial({color:0x22ff9b}));beaconBulb.position.set(-23,8.65,4);scene.add(beaconBulb);const beaconGlow=new THREE.PointLight(0x22ff9b,0,24);beaconGlow.position.set(-23,9,4);scene.add(beaconGlow);
+const beamPivot=new THREE.Group();beamPivot.position.set(-23,8.7,4);scene.add(beamPivot);const beam=new THREE.Mesh(new THREE.ConeGeometry(1.0,18,24,1,true),new THREE.MeshBasicMaterial({color:0x22ff9b,transparent:true,opacity:.13,side:THREE.DoubleSide,depthWrite:false}));beam.rotation.x=Math.PI/2;beam.position.z=-9;beamPivot.add(beam);
+// simple terminal silhouette
+const terminalMat=new THREE.MeshStandardMaterial({color:0x202c3b,roughness:1});box(16,4,7,terminalMat,31,2,-25);for(let x=24;x<=38;x+=3)box(.12,1.1,.12,new THREE.MeshBasicMaterial({color:0xffc766}),x,2.5,-21.35);
+// orbit-like controls, no external controls dependency
+let dragging=false,lastX=0,lastY=0,azimuth=.5,elevation=.48,distance=76,target=new THREE.Vector3(0,0,15);
+function placeCamera(){elevation=Math.max(.12,Math.min(1.35,elevation));distance=Math.max(24,Math.min(150,distance));camera.position.set(target.x+distance*Math.sin(azimuth)*Math.cos(elevation),target.y+distance*Math.sin(elevation),target.z+distance*Math.cos(azimuth)*Math.cos(elevation));camera.lookAt(target)}
+renderer.domElement.addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture(e.pointerId)});renderer.domElement.addEventListener('pointermove',e=>{if(!dragging)return;azimuth-=(e.clientX-lastX)*.006;elevation+=(e.clientY-lastY)*.005;lastX=e.clientX;lastY=e.clientY;placeCamera()});renderer.domElement.addEventListener('pointerup',()=>dragging=false);renderer.domElement.addEventListener('pointercancel',()=>dragging=false);renderer.domElement.addEventListener('wheel',e=>{distance+=e.deltaY*.045;placeCamera();e.preventDefault()},{passive:false});placeCamera();
+let runwayOn=false,approachOn=false,beaconOn=false,allLights=false;function setGroup(group,on){for(const o of group){o.material.opacity=on?1:(o.geometry.type==='SphereGeometry'?.12:0.16);if(o.material.emissive)o.material.emissiveIntensity=on?1:0}}
+function applyVisuals(){runwayBulbs.forEach(o=>{o.visible=runwayOn});endBulbs.forEach(o=>{o.visible=runwayOn});approachBulbs.forEach(o=>{o.visible=approachOn});taxiBulbs.forEach(o=>{o.visible=approachOn});beaconBulb.visible=beaconOn;beaconGlow.intensity=beaconOn?4:0;beam.visible=beaconOn}
+applyVisuals();function animate(){requestAnimationFrame(animate);if(beaconOn){beamPivot.rotation.y+=.035;beaconBulb.material.color.setHex(Math.floor(Date.now()/450)%2?0x22ff9b:0xffffff);beaconGlow.color.copy(beaconBulb.material.color)}renderer.render(scene,camera)}animate();window.addEventListener('resize',()=>{const w=wrap.clientWidth;const h=window.innerWidth<600?390:560;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h)});
+// ===== MQTT: keeps the original topic and command names =====
+const MQTT_URL='wss://broker.hivemq.com:8884/mqtt';const CONTROL_TOPIC='poltekbang/sim/runway/control_2026a7';const STATUS_TOPIC='poltekbang/sim/runway/status_2026a7';
+let client;try{client=mqtt.connect(MQTT_URL,{connectTimeout:10000,reconnectPeriod:3000,clientId:'runway_web_'+Math.random().toString(16).slice(2,10)});client.on('connect',()=>{const s=document.getElementById('connectionStatus');s.textContent='TERHUBUNG';s.className='status-online';client.subscribe(STATUS_TOPIC)});client.on('reconnect',()=>{const s=document.getElementById('connectionStatus');s.textContent='MENYAMBUNG ULANG...';s.className='status-offline'});client.on('error',e=>console.warn('MQTT error',e));client.on('offline',()=>{const s=document.getElementById('connectionStatus');s.textContent='OFFLINE';s.className='status-offline'});client.on('message',(topic,message)=>{if(topic!==STATUS_TOPIC)return;try{const d=JSON.parse(message.toString());const r=!!(d.runway1&&d.runway2&&d.runway3&&d.runway4);runwayOn=r;approachOn=!!d.approach;beaconOn=!!d.beacon;applyVisuals();updateStatus('runwayStatus',r?'ON':'OFF');updateStatus('approachStatus',approachOn?'ON':'OFF');updateStatus('beaconStatus',beaconOn?'ACTIVE':'OFF');const e=document.getElementById('emergencyStatus');e.textContent=d.emergency?'🚨 EMERGENCY ACTIVE':'SYSTEM NORMAL';e.className=d.emergency?'device-status danger':'device-status'}catch(e){console.warn('Status JSON error',e)}})}catch(e){console.warn(e)}
+function sendCommand(command){if(!client||!client.connected){alert('MQTT belum terhubung. Pastikan broker dan ESP32 Wokwi aktif.');return}client.publish(CONTROL_TOPIC,command);console.log('Command sent:',command); // optimistic visual feedback; ESP32 status will confirm
+if(command==='RUNWAY_ON')runwayOn=true;if(command==='RUNWAY_OFF')runwayOn=false;if(command==='APPROACH_ON')approachOn=true;if(command==='APPROACH_OFF')approachOn=false;if(command==='BEACON_ON')beaconOn=true;if(command==='BEACON_OFF')beaconOn=false;if(command==='ALL_ON'){runwayOn=approachOn=beaconOn=true}if(command==='ALL_OFF'){runwayOn=approachOn=beaconOn=false}if(command==='EMERGENCY_ON'){const e=document.getElementById('emergencyStatus');e.textContent='🚨 EMERGENCY ACTIVE';e.className='device-status danger'}if(command==='EMERGENCY_OFF'){const e=document.getElementById('emergencyStatus');e.textContent='SYSTEM NORMAL';e.className='device-status'}applyVisuals();updateStatus('runwayStatus',runwayOn?'ON':'OFF');updateStatus('approachStatus',approachOn?'ON':'OFF');updateStatus('beaconStatus',beaconOn?'ACTIVE':'OFF')}
+function updateStatus(id,state){const el=document.getElementById(id);el.textContent=state;el.className=state==='ON'||state==='ACTIVE'?'device-status active':'device-status'}
+</script>
+</body></html>
